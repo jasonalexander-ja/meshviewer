@@ -30,7 +30,7 @@ impl Autocomplete for PrevIpAutocomplete {
     ) -> Result<Replacement, CustomUserError> {
         let res = match highlighted_suggestion {
             Some(s) => Some(s),
-            None => self.prev_ip_acc.get_prev_ips(input.to_owned())?.iter().last().cloned()
+            None => Some(self.prev_ip_acc.add_address(input.to_owned())?)
         };
         Ok(res)
     }

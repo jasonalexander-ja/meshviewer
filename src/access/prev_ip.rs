@@ -1,4 +1,4 @@
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use rusqlite::{Connection, Error, OptionalExtension, Result};
 
 use super::{DbService, Query, AccessErr};
@@ -11,7 +11,7 @@ pub struct PrevIpAccessor {
 
 pub enum PrevIpQueries {
     GetIps(String, Sender<Result<Vec<String>>>),
-    AddIp(String, Sender<Result<()>>)
+    AddIp(String, Sender<Result<String>>)
 }
 
 impl PrevIpAccessor {
@@ -23,28 +23,32 @@ impl PrevIpAccessor {
     pub fn get_prev_ips(&self, ip: String) -> Result<Vec<String>, AccessErr<Error>> {
         let (sender, receiver) = channel();
         let query = PrevIpQueries::GetIps(ip, sender);
-        if let Err(_) = self.sender.send(Query::PrevIp(query)) { return Err(AccessErr::FailedToSend) };
-        let res = if let Ok(v) = receiver.recv() { v } else { return Err(AccessErr::FailedToRecv) };
-        match res {
-            Ok(v) => Ok(v),
-            Err(e) => Err(AccessErr::InnerError(e))
-        }
+        self.issue_query(query, receiver)
     }
 
-    pub fn add_user(&self, ip: String) -> Result<(), AccessErr<Error>> {
+    pub fn add_address(&self, ip: String) -> Result<String, AccessErr<Error>> {
         let (sender, receiver) = channel();
         let query = PrevIpQueries::AddIp(ip, sender);
-        if let Err(_) = self.sender.send(Query::PrevIp(query)) { return Err(AccessErr::FailedToSend) };
-        if let Err(_) = receiver.recv() { return Err(AccessErr::FailedToRecv) };
-        Ok(())
+        self.issue_query(query, receiver)
+    }
+
+    fn issue_query<T>(&self, 
+        query: PrevIpQueries, 
+        receiver: Receiver<Result<T, Error>>
+    ) -> Result<T, AccessErr<Error>> {
+        self.sender.send(Query::PrevIp(query))
+            .map_err(|_| AccessErr::FailedToSend)?;
+
+        receiver.recv().map_err(|_| AccessErr::FailedToRecv)?
+            .map_err(|e| AccessErr::InnerError(e))
     }
 }
 
 #[allow(unused_must_use)]
 pub fn run_prev_ip_query(query: PrevIpQueries, db: &Connection) {
     match query {
-        PrevIpQueries::AddIp(ip, sender) => { sender.send(add_prev_ip(ip, db)); },
-        PrevIpQueries::GetIps(ip, sender) => { sender.send(get_prev_ips(ip, db)); }
+        PrevIpQueries::AddIp(ip, sender) => sender.send(add_prev_ip(ip, db)).map_err(|_| ()),
+        PrevIpQueries::GetIps(ip, sender) => sender.send(get_prev_ips(ip, db)).map_err(|_| ()),
     };
 }
 
@@ -55,21 +59,22 @@ fn get_prev_ips(ip: String, db: &Connection) -> Result<Vec<String>> {
     res.collect()
 }
 
-fn add_prev_ip(ip: String, db: &Connection) -> Result<()> {
-    let prev_used_opt = db.query_row("SELCT used FROM prev_ip WHERE address = (?1)", 
+fn add_prev_ip(ip: String, db: &Connection) -> Result<String> {
+    let prev_used_opt = db.query_row("SELCT address, used FROM prev_ip WHERE address = (?1)", 
             [&ip], 
-            |r| r.get::<usize, usize>(0)
+            |r| Ok((r.get::<usize, String>(0)?, r.get::<usize, usize>(1)?))
         )
         .optional()?;
-    if let Some(prev_used) = prev_used_opt {
-        return update_prev_ip(prev_used, db);
+    if let Some((ip, prev_used)) = prev_used_opt {
+        update_prev_ip(prev_used, db)?;
+        return Ok(ip)
     }
 
     db.execute("INSERT INTO prev_ip (address, used) VALUES (?1, 0);", [&ip])?;
     db.execute("UPDATE prev_ip SET used = used + 1;", [])?;
     db.execute("DELETE FROM prev_ip WHERE used = 6;", [])?;
 
-    Ok(())
+    Ok(ip)
 }
 
 fn update_prev_ip(prev_used: usize, db: &Connection) -> Result<()> {

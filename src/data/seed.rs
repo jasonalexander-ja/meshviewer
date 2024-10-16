@@ -14,7 +14,7 @@ pub fn check_db(db: &Connection) -> Result<()> {
 }
 
 pub fn update_db_version(ver: usize, db: &Connection) -> Result<()> {
-    db.execute("TRUNCATE TABLE db_version;", ())?;
+    db.execute("DELETE FROM db_version;", ())?;
     db.execute(
         "INSERT INTO db_version (version) VALUES (?1)", 
         [ver]
