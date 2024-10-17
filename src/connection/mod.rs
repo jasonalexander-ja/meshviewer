@@ -59,12 +59,11 @@ pub async fn connect(config: &Params, db: &DbService) -> Result<Connection, Conn
 }
 
 async fn poll_user_source(db: &DbService) -> Result<Connection, ConnectError> {
-    let serial = Select::new("Connect via Serial or TCP", vec![true, false])
-        .with_formatter(&|e| if *e.value { format!("Serial") } else { format!("TCP") })
+    let serial = Select::new("Connect via Serial or TCP", vec!["Serial", "TCP"])
         .prompt()
         .map_err(|e| ConnectError::InquireError(e))?;
 
-    if serial {
+    if serial == "Serial" {
         return poll_user_serial().await;
     }
     poll_user_ip(db).await
@@ -82,7 +81,7 @@ async fn poll_user_serial() -> Result<Connection, ConnectError> {
 
 async fn poll_user_ip(db: &DbService) -> Result<Connection, ConnectError> {
     let prev_ip_acc = crate::access::prev_ip::PrevIpAccessor::new(db);
-    let host = Text::new("")
+    let host = Text::new("What is the IP and port number?")
         .with_autocomplete(prev_ip::PrevIpAutocomplete::new(prev_ip_acc))
         .prompt()
         .map_err(|e| ConnectError::InquireError(e))?;
