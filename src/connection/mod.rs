@@ -13,6 +13,8 @@ use crate::cli::Params;
 use crate::cli::autocompletes::prev_ip;
 use crate::access::DbService;
 
+pub mod service;
+
 
 pub type Connection = (UnboundedReceiver<FromRadio>, ConnectedStreamApi);
 
